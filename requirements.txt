@@ -1,0 +1,3 @@
+# Dependencias del RPA de Solicitudes de Pago (SIPP)
+# Sin versión fija: usa la última, que trae binarios para Python 3.14.
+playwright

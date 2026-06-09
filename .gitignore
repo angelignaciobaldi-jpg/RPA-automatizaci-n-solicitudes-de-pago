@@ -1,0 +1,29 @@
+# === Datos sensibles (NUNCA subir a GitHub) ===
+*.csv
+CARATULAS/
+VOBO/
+logs/
+HTML PAGES/
+
+# === Artefactos de compilación (PyInstaller) ===
+build/
+dist/
+*.spec
+
+# === Scripts de prueba/diagnóstico (contienen nombres reales de personas) ===
+prueba_*.py
+explorar_*.py
+listar_conceptos.py
+correr_stage.py
+
+# === Python / entorno / herramientas locales ===
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.claude/
+
+# === Otros ===
+Thumbs.db
+desktop.ini
