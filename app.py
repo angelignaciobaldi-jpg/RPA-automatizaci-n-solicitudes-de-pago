@@ -84,6 +84,22 @@ class App(tk.Tk):
         self._construir()
         self._enganchar_log()
         self.after(150, self._drenar_cola)
+        self._avisar_actualizacion()
+
+    def _avisar_actualizacion(self):
+        """Muestra en el log si el lanzador actualizó código desde GitHub."""
+        upd = os.environ.get("RPA_ACTUALIZADOS")
+        if upd is None:
+            return
+        try:
+            k = int(upd)
+        except ValueError:
+            return
+        if k > 0:
+            self._log_ui(f"Actualización: se descargaron {k} archivo(s) de "
+                         f"código nuevos/actualizados desde GitHub.")
+        else:
+            self._log_ui("Código verificado con GitHub: ya estaba al día.")
 
     # ------------------------------------------------------------------ #
     #  Construcción de la interfaz
