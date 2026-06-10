@@ -646,19 +646,27 @@ def llenar_concepto_pago(page, monto, concepto=None):
     if not ya_sel:
         fila.locator("div.ngSelectionCell").first.click()
         page.wait_for_timeout(500)
-    # 3) Respaldo: si el total quedó en 0, fuerza el recálculo por AngularJS.
+    # 3) BLINDAJE: verifica 'Cantidad a Pagar' (lo que realmente se guarda). Si
+    #    quedó en 0 (por timing/versión), lo FUERZA = suma de conceptos
+    #    seleccionados, para que la solicitud NUNCA se guarde en $0.
     try:
+        cantidad = _leer_cantidad_pagar(page)
         total = _leer_total(page)
-        if _es_cero(total):
+        if _es_cero(cantidad) or _es_cero(total):
             monto_input.evaluate(
                 "el => { const s = angular.element(el).scope();"
-                " if (typeof s.cambioImporteConceptos === 'function') {"
-                " s.cambioImporteConceptos(s.row); s.$root.$apply(); } }")
+                " if (typeof s.cambioImporteConceptos === 'function')"
+                "   s.cambioImporteConceptos(s.row);"
+                " let t = 0; const arr = s.ar_ConceptosGastosSelc || [];"
+                " for (const i in arr) t += parseFloat(arr[i].IM_IMPORTE || 0);"
+                " if (s.solicitudPago) s.solicitudPago.IM_CANTIDADPAGAR = t.toFixed(2);"
+                " s.im_TotalConceptos = t.toFixed(2); s.$root.$apply(); }")
             page.wait_for_timeout(300)
-            total = _leer_total(page)
-        log.info("   Cantidad a Pagar (total): %s", total or "(no leído)")
-        if _es_cero(total):
-            log.warning("   ¡OJO! El total sigue en 0 tras capturar el concepto.")
+            cantidad = _leer_cantidad_pagar(page)
+        log.info("   Cantidad a Pagar = %s | Total Conceptos = %s",
+                 cantidad or "(?)", _leer_total(page) or "(?)")
+        if _es_cero(cantidad):
+            log.warning("   ¡OJO! 'Cantidad a Pagar' quedó en 0.")
     except Exception:
         pass
 
@@ -668,11 +676,22 @@ def _es_cero(total):
         "", "0", "0.00", ".00")
 
 
+def _leer_cantidad_pagar(page):
+    """Lee el campo 'Cantidad a Pagar' (solicitudPago.IM_CANTIDADPAGAR), que es
+    el importe que se guarda en la solicitud."""
+    loc = page.locator("input[ng-model='solicitudPago.IM_CANTIDADPAGAR']")
+    try:
+        if loc.count() > 0:
+            return loc.first.input_value()
+    except Exception:
+        pass
+    return ""
+
+
 def _leer_total(page):
-    """Devuelve el texto del total de la solicitud (Cantidad a Pagar), si se
-    puede leer; '' si no. Solo informativo para la bitácora."""
+    """Devuelve el texto del 'Total Conceptos' (im_TotalConceptos), informativo
+    para la bitácora."""
     for sel in ("input[ng-model='im_TotalConceptos']",
-                "input[ng-model='solicitudPago.IM_TOTAL']",
                 "input[ng-model='solicitudPago.IM_CANTIDADPAGAR']"):
         loc = page.locator(sel)
         try:
