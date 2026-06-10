@@ -38,7 +38,7 @@ import sipp_rpa
 #  AMBIENTE DEL EJECUTABLE
 #  "PRODUCCION" = versión final | "PRUEBAS" = preprod (para probar)
 # ===================================================================== #
-AMBIENTE_APP = "PRODUCCION"
+AMBIENTE_APP = "PRODUCCION"   # PRUEBAS=preprod (validación) | PRODUCCION=final
 # ===================================================================== #
 
 config.AMBIENTE = AMBIENTE_APP
@@ -77,6 +77,7 @@ class App(tk.Tk):
         # Control de avance / reanudar.
         self.filas_run = []                # registros seleccionados a procesar
         self.fila_check = {}               # id(fila) -> incluido (casilla ✓)
+        self.procesados_ok = set()         # claves de registros ya procesados (OK)
         self.siguiente = 0                 # índice del próximo registro a procesar
         self.resultados_global = []        # detalle acumulado entre corridas
         self.usuario = ""
@@ -213,6 +214,7 @@ class App(tk.Tk):
                               stretch=(c == "obs"))
         self.tabla.tag_configure("mal", foreground=COLOR_MAL)
         self.tabla.tag_configure("omit", foreground="#888")
+        self.tabla.tag_configure("hecho", foreground=COLOR_OK)   # ya procesado
         sb = ttk.Scrollbar(f2, orient="vertical", command=self.tabla.yview)
         self.tabla.configure(yscrollcommand=sb.set)
         self.tabla.pack(side="left", fill="both", expand=True)
@@ -322,6 +324,7 @@ class App(tk.Tk):
         self.siguiente = 0
         self.resultados_global = []
         self.fila_check = {}
+        self.procesados_ok = set()
         self.var_todos.set(True)
         self._mostrar_preview()
         self._actualizar_botones()
@@ -414,16 +417,26 @@ class App(tk.Tk):
             monto = sipp_rpa.campo_monto(fila).strip()
             tags = ()
             obs = ""
-            if not sipp_rpa.limpiar_monto(monto):
-                obs = "Sin monto (se omite)"
-                tags = ("omit",)
-            elif nombre in probs:
-                obs = "; ".join(probs[nombre])
-                tags = ("mal",)
-            chk = self.fila_check.get(id(fila), True)   # por defecto: incluido
-            self.fila_check[id(fila)] = chk
+            hecho = sipp_rpa.clave_registro(fila) in self.procesados_ok
+            if hecho:
+                # Ya procesado en esta carga: NO se vuelve a seleccionar.
+                obs = "Ya procesado ✓ (no se repite)"
+                tags = ("hecho",)
+                chk = False
+                self.fila_check[id(fila)] = False
+                glifo = "✔"
+            else:
+                if not sipp_rpa.limpiar_monto(monto):
+                    obs = "Sin monto (se omite)"
+                    tags = ("omit",)
+                elif nombre in probs:
+                    obs = "; ".join(probs[nombre])
+                    tags = ("mal",)
+                chk = self.fila_check.get(id(fila), True)   # por defecto: incluido
+                self.fila_check[id(fila)] = chk
+                glifo = "☑" if chk else "☐"
             iid = self.tabla.insert("", "end",
-                                    values=("☑" if chk else "☐", nombre, empresa,
+                                    values=(glifo, nombre, empresa,
                                             banco, clabe or "—", monto or "—", obs),
                                     tags=tags)
             self.item_a_fila[iid] = fila
@@ -450,6 +463,9 @@ class App(tk.Tk):
         except Exception:
             pass
 
+    def _esta_hecho(self, fila):
+        return sipp_rpa.clave_registro(fila) in self.procesados_ok
+
     def _click_tabla(self, event):
         """Clic en la casilla ✓ de un renglón -> incluye/excluye ese registro."""
         if self.tabla.identify_region(event.x, event.y) != "cell":
@@ -460,6 +476,8 @@ class App(tk.Tk):
         fila = self.item_a_fila.get(iid)
         if fila is None:
             return
+        if self._esta_hecho(fila):
+            return "break"   # ya procesado: no se puede volver a seleccionar
         nuevo = not self.fila_check.get(id(fila), True)
         self.fila_check[id(fila)] = nuevo
         self.tabla.set(iid, "sel", "☑" if nuevo else "☐")
@@ -467,9 +485,12 @@ class App(tk.Tk):
         return "break"
 
     def _toggle_todos(self):
-        """Casilla 'Seleccionar todos': marca/desmarca todos los renglones."""
+        """Casilla 'Seleccionar todos': marca/desmarca todos (menos los ya
+        procesados, que quedan excluidos)."""
         val = self.var_todos.get()
         for iid, fila in self.item_a_fila.items():
+            if self._esta_hecho(fila):
+                continue
             self.fila_check[id(fila)] = val
             self.tabla.set(iid, "sel", "☑" if val else "☐")
         self._actualizar_conteo_sel()
@@ -478,9 +499,12 @@ class App(tk.Tk):
         if not self.filas:
             self.lbl_sel.config(text="")
             return
-        n = sum(1 for f in self.filas if self.fila_check.get(id(f), True))
+        sel = sum(1 for f in self.filas if self.fila_check.get(id(f), True)
+                  and not self._esta_hecho(f))
+        hechos = sum(1 for f in self.filas if self._esta_hecho(f))
+        extra = f"   |   Ya procesados: {hechos}" if hechos else ""
         self.lbl_sel.config(
-            text=f"Seleccionados para procesar: {n} de {len(self.filas)}")
+            text=f"Seleccionados para procesar: {sel} de {len(self.filas)}{extra}")
 
     # ------------------------------------------------------------------ #
     #  Ejecutar el robot
@@ -491,7 +515,7 @@ class App(tk.Tk):
                       or bool(config.ARCHIVOS_CARATULAS)))
         e = self.estado
         self.btn_iniciar.config(
-            state="normal" if (listo and e == "idle") else "disabled")
+            state="normal" if (listo and e in ("idle", "fin")) else "disabled")
         self.btn_detener.config(
             state="normal" if e == "corriendo" else "disabled")
         self.btn_reanudar.config(
@@ -535,9 +559,9 @@ class App(tk.Tk):
         return u, p
 
     def _seleccionados(self):
-        """Filas marcadas con la casilla ✓ (las que se van a procesar)."""
+        """Filas marcadas con la casilla ✓ y NO procesadas aún (evita duplicar)."""
         return [f for f in (self.filas or [])
-                if self.fila_check.get(id(f), True)]
+                if self.fila_check.get(id(f), True) and not self._esta_hecho(f)]
 
     def _confirmar_inicio(self, seleccion):
         con_monto = sum(1 for f in seleccion
@@ -683,6 +707,13 @@ class App(tk.Tk):
         detenido = r.get("detenido", False) and self.siguiente < len(self.filas_run)
         self.estado = "detenido" if detenido else "fin"
         self._actualizar_botones()
+
+        # Marca como YA PROCESADOS los registros que salieron OK, para que no se
+        # puedan volver a seleccionar/procesar en esta carga (evita duplicados).
+        for x in self.resultados_global:
+            if x.get("estado") == "OK" and x.get("clave"):
+                self.procesados_ok.add(x["clave"])
+        self._mostrar_preview()   # refresca: los OK quedan marcados y bloqueados
 
         cont = {}
         for x in self.resultados_global:

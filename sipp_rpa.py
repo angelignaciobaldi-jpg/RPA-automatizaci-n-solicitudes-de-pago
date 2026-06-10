@@ -168,6 +168,17 @@ def limpiar_monto(valor):
     return (valor or "").replace("$", "").replace(",", "").strip()
 
 
+def clave_registro(fila):
+    """Clave estable para identificar un registro y evitar duplicados:
+    colaborador + empresa + CLABE + monto (normalizados)."""
+    nombre = campo(fila, "EX-COLABORADOR (DESCRIPCIÓN)", "NOMBRE DE CUENTA")
+    empresa = campo(fila, "EMPRESA")
+    clabe = campo(fila, "CLAVE INTERBANCARIA", "CLABE")
+    monto = limpiar_monto(campo_monto(fila))
+    return "|".join([normalizar(nombre), normalizar(empresa),
+                     normalizar(clabe), monto])
+
+
 def resolver_descripcion(texto, nombre):
     """Sustituye el texto literal 'NOMBRE DE COLABORADOR' por el nombre real."""
     return re.sub(r"NOMBRE DE(?:L)? COLABORADOR", nombre, texto, flags=re.IGNORECASE)
@@ -258,7 +269,14 @@ def seleccionar_chosen(page, select_locator, texto, descripcion, intentos=4):
             contenedor.scroll_into_view_if_needed()
             contenedor.click()
             buscador = contenedor.locator("input.chosen-search-input")
-            buscador.fill(texto)
+            # TECLEAR el texto (no fill): chosen filtra con el evento 'keyup'.
+            # Con fill() no filtra, y las opciones más allá de las ~100 que
+            # renderiza por defecto (ej. 'Spin by OXXO') nunca aparecen.
+            buscador.click()
+            buscador.press("Control+a")
+            buscador.press("Delete")
+            buscador.type(texto, delay=20)
+            page.wait_for_timeout(350)
             opcion = contenedor.locator("li.active-result", has_text=texto).first
             opcion.wait_for(state="visible", timeout=6000)
             opcion.click()
@@ -1057,7 +1075,7 @@ def procesar(usuario, contrasena, filas, on_progreso=None, detener=None,
                     # pueda generar el reporte en cualquier momento).
                     r = {"nombre": nombre, "empresa": empresa, "banco": banco,
                          "monto": monto_txt or "—", "estado": estado,
-                         "detalle": detalle}
+                         "detalle": detalle, "clave": clave_registro(fila)}
                     resultados.append(r)
                     avisar(i=i, total=total, nombre=nombre,
                            estado=estado.lower(), resultado=r)
