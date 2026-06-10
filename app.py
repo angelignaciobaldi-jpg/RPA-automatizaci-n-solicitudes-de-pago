@@ -108,7 +108,7 @@ class App(tk.Tk):
         pad = {"padx": 8, "pady": 4}
 
         # --- Pie de página (parte inferior) ---
-        tk.Label(self, text="Hecho por Quetaltic Solutions", fg="#888",
+        tk.Label(self, text="Quetzaltic Solutions | Hecho por Angel Baldi", fg="#888",
                  font=("Segoe UI", 8)).pack(side="bottom", pady=4)
 
         # --- Encabezado: logo + título en la MISMA fila ---
