@@ -620,18 +620,69 @@ def llenar_concepto_pago(page, monto, concepto=None):
     except Exception:
         pass
     fila.scroll_into_view_if_needed()
-    # 1) Captura el monto (dispara cambioImporteConceptos).
-    monto_input = fila.locator("input[ng-model='row.entity.IM_IMPORTE']")
-    monto_input.fill(str(monto))
-    monto_input.dispatch_event("input")
-    monto_input.dispatch_event("change")
-    monto_input.blur()
-    # 2) Selecciona el renglón: el checkbox usa ng-checked='row.selected', así que
-    #    NO se marca directo; hay que clicar la celda de 'Seleccionar' para que el
-    #    renglón quede seleccionado (row.toggleSelected) y se sume al Total.
-    sel = fila.locator("input.ngSelectionCheckbox")
-    if not sel.is_checked():
-        fila.locator("div.ngSelectionCell").click()
+    monto_input = fila.locator("input[ng-model='row.entity.IM_IMPORTE']").first
+    # 1) Captura el monto TECLEÁNDOLO (la directiva de moneda 'contenido_moneda'
+    #    necesita pulsaciones reales; con fill() el modelo no se confirma bien).
+    monto_input.click()
+    try:
+        monto_input.press("Control+a")
+    except Exception:
+        pass
+    monto_input.type(str(monto), delay=30)
+    monto_input.press("Tab")          # blur: confirma el importe en el modelo
+    page.wait_for_timeout(400)
+    # 2) Selecciona el renglón con la CELDA de selección (div.ngSelectionCell).
+    #    Esto agrega el concepto a 'ar_ConceptosGastosSelc' y dispara el recálculo
+    #    del total (im_TotalConceptos / IM_CANTIDADPAGAR). El total suma SOLO los
+    #    conceptos seleccionados, por eso esto es lo que evita el $0.
+    #    OJO: NO clicar el nombre u otra celda de la fila -> en ng-grid eso
+    #    DESELECCIONA el renglón.
+    ya_sel = False
+    try:
+        ya_sel = bool(monto_input.evaluate(
+            "el => !!angular.element(el).scope().row.selected"))
+    except Exception:
+        pass
+    if not ya_sel:
+        fila.locator("div.ngSelectionCell").first.click()
+        page.wait_for_timeout(500)
+    # 3) Respaldo: si el total quedó en 0, fuerza el recálculo por AngularJS.
+    try:
+        total = _leer_total(page)
+        if _es_cero(total):
+            monto_input.evaluate(
+                "el => { const s = angular.element(el).scope();"
+                " if (typeof s.cambioImporteConceptos === 'function') {"
+                " s.cambioImporteConceptos(s.row); s.$root.$apply(); } }")
+            page.wait_for_timeout(300)
+            total = _leer_total(page)
+        log.info("   Cantidad a Pagar (total): %s", total or "(no leído)")
+        if _es_cero(total):
+            log.warning("   ¡OJO! El total sigue en 0 tras capturar el concepto.")
+    except Exception:
+        pass
+
+
+def _es_cero(total):
+    return (total or "0").replace("$", "").replace(",", "").strip() in (
+        "", "0", "0.00", ".00")
+
+
+def _leer_total(page):
+    """Devuelve el texto del total de la solicitud (Cantidad a Pagar), si se
+    puede leer; '' si no. Solo informativo para la bitácora."""
+    for sel in ("input[ng-model='im_TotalConceptos']",
+                "input[ng-model='solicitudPago.IM_TOTAL']",
+                "input[ng-model='solicitudPago.IM_CANTIDADPAGAR']"):
+        loc = page.locator(sel)
+        try:
+            if loc.count() > 0:
+                v = loc.first.input_value()
+                if v:
+                    return v
+        except Exception:
+            continue
+    return ""
 
 
 def guardar_solicitud(page):
