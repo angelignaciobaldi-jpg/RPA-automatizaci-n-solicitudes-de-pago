@@ -75,6 +75,8 @@ class App(tk.Tk):
         self.detener_flag = threading.Event()
         self.worker = None
         # Control de avance / reanudar.
+        self.filas_run = []                # registros seleccionados a procesar
+        self.fila_check = {}               # id(fila) -> incluido (casilla ✓)
         self.siguiente = 0                 # índice del próximo registro a procesar
         self.resultados_global = []        # detalle acumulado entre corridas
         self.usuario = ""
@@ -131,8 +133,26 @@ class App(tk.Tk):
         # Línea de acento.
         tk.Frame(self, bg="#00437f", height=3).pack(fill="x")
 
+        # --- Cuerpo con barra de desplazamiento vertical ---
+        cont = tk.Frame(self)
+        cont.pack(fill="both", expand=True)
+        self._canvas = tk.Canvas(cont, highlightthickness=0, borderwidth=0)
+        vsb = ttk.Scrollbar(cont, orient="vertical", command=self._canvas.yview)
+        self._canvas.configure(yscrollcommand=vsb.set)
+        vsb.pack(side="right", fill="y")
+        self._canvas.pack(side="left", fill="both", expand=True)
+        cuerpo = tk.Frame(self._canvas)
+        win_id = self._canvas.create_window((0, 0), window=cuerpo, anchor="nw")
+        self._canvas.bind(
+            "<Configure>",
+            lambda e: self._canvas.itemconfigure(win_id, width=e.width))
+        cuerpo.bind(
+            "<Configure>",
+            lambda e: self._canvas.configure(scrollregion=self._canvas.bbox("all")))
+        self.bind_all("<MouseWheel>", self._rueda)
+
         # --- Paso 1: Archivos (CSV + carpetas de carátulas y Vo.Bo.) ---
-        f1 = tk.LabelFrame(self, text="1) Archivos", **pad)
+        f1 = tk.LabelFrame(cuerpo, text="1) Archivos", **pad)
         f1.pack(fill="x", **pad)
         fmt = tk.Frame(f1)
         fmt.grid(row=0, column=0, sticky="w", padx=6, pady=4)
@@ -165,37 +185,44 @@ class App(tk.Tk):
         self.lbl_vobo.grid(row=2, column=2, padx=6, sticky="w")
 
         # --- Vista previa ---
-        f2 = tk.LabelFrame(self, text="Vista previa", **pad)
+        f2 = tk.LabelFrame(cuerpo, text="Vista previa", **pad)
         f2.pack(fill="both", expand=True, **pad)
         self.lbl_resumen = tk.Label(f2, text="Carga un CSV para ver el resumen.",
                                     anchor="w", justify="left")
         self.lbl_resumen.pack(fill="x")
-        # Barra para quitar registros antes de ejecutar.
-        barra_prev = tk.Frame(f2)
-        barra_prev.pack(fill="x", side="bottom")
-        tk.Button(barra_prev, text="🗑 Quitar seleccionado(s)",
-                  command=self.quitar_seleccionados).pack(side="left", pady=2)
-        tk.Label(barra_prev, fg="#777",
-                 text="  (selecciona filas y quítalas para NO procesarlas; "
-                      "también con la tecla Supr)").pack(side="left")
-        cols = ("col", "empresa", "banco", "clabe", "monto", "obs")
+        # Barra: seleccionar todos / conteo de seleccionados.
+        barra_sel = tk.Frame(f2)
+        barra_sel.pack(fill="x", side="bottom")
+        self.var_todos = tk.BooleanVar(value=True)
+        tk.Checkbutton(barra_sel, text="Seleccionar todos",
+                       variable=self.var_todos, command=self._toggle_todos
+                       ).pack(side="left", pady=2)
+        self.lbl_sel = tk.Label(barra_sel, fg="#777",
+                                text="(clic en la casilla ✓ de cada renglón "
+                                     "para incluir/excluir del proceso)")
+        self.lbl_sel.pack(side="left", padx=8)
+        cols = ("sel", "col", "empresa", "banco", "clabe", "monto", "obs")
         self.tabla = ttk.Treeview(f2, columns=cols, show="headings", height=10)
-        for c, t, w in [("col", "Colaborador", 200), ("empresa", "Empresa", 100),
-                        ("banco", "Banco", 100), ("clabe", "CLABE", 160),
-                        ("monto", "Monto", 90), ("obs", "Observaciones", 210)]:
+        for c, t, w in [("sel", "✓", 34), ("col", "Colaborador", 190),
+                        ("empresa", "Empresa", 100), ("banco", "Banco", 100),
+                        ("clabe", "CLABE", 150), ("monto", "Monto", 90),
+                        ("obs", "Observaciones", 200)]:
             self.tabla.heading(c, text=t)
-            self.tabla.column(c, width=w, anchor="w")
+            self.tabla.column(c, width=w,
+                              anchor=("center" if c == "sel" else "w"),
+                              stretch=(c == "obs"))
         self.tabla.tag_configure("mal", foreground=COLOR_MAL)
         self.tabla.tag_configure("omit", foreground="#888")
         sb = ttk.Scrollbar(f2, orient="vertical", command=self.tabla.yview)
         self.tabla.configure(yscrollcommand=sb.set)
         self.tabla.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
-        self.tabla.bind("<Delete>", lambda e: self.quitar_seleccionados())
-        self.item_a_fila = {}   # iid del Treeview -> fila (para quitar)
+        self.tabla.bind("<Button-1>", self._click_tabla)
+        self.item_a_fila = {}    # iid del Treeview -> fila
+        self.fila_check = {}     # id(fila) -> bool (incluido en el proceso)
 
         # --- Paso 2: credenciales y opciones ---
-        f3 = tk.LabelFrame(self, text="2) Credenciales SIPP", **pad)
+        f3 = tk.LabelFrame(cuerpo, text="2) Credenciales SIPP", **pad)
         f3.pack(fill="x", **pad)
         tk.Label(f3, text="Usuario:").grid(row=0, column=0, sticky="e", padx=4, pady=4)
         self.ent_usuario = tk.Entry(f3, width=24)
@@ -208,7 +235,7 @@ class App(tk.Tk):
                        ).grid(row=0, column=4, padx=12)
 
         # --- Paso 3: ejecutar ---
-        f4 = tk.Frame(self)
+        f4 = tk.Frame(cuerpo)
         f4.pack(fill="x", **pad)
         self.btn_iniciar = tk.Button(f4, text="▶  Iniciar", width=12,
                                      bg="#00437f", fg="white",
@@ -232,10 +259,10 @@ class App(tk.Tk):
         self.lbl_estado = tk.Label(f4, text="", width=20, anchor="w")
         self.lbl_estado.pack(side="left")
 
-        # --- Log ---
-        f5 = tk.LabelFrame(self, text="Avance", **pad)
+        # --- Log / Bitácora ---
+        f5 = tk.LabelFrame(cuerpo, text="Bitácora (Avance)", **pad)
         f5.pack(fill="both", expand=True, **pad)
-        self.txt = tk.Text(f5, height=10, state="disabled", wrap="word",
+        self.txt = tk.Text(f5, height=12, state="disabled", wrap="word",
                            font=("Consolas", 9))
         sb2 = ttk.Scrollbar(f5, orient="vertical", command=self.txt.yview)
         self.txt.configure(yscrollcommand=sb2.set)
@@ -290,10 +317,12 @@ class App(tk.Tk):
                                           config.ARCHIVOS_VOBO,
                                           "(opcional — no todos lo tienen)")
 
-        # CSV nuevo: estado limpio (desde cero).
+        # Archivo nuevo: estado limpio (desde cero) y todo seleccionado.
         self.estado = "idle"
         self.siguiente = 0
         self.resultados_global = []
+        self.fila_check = {}
+        self.var_todos.set(True)
         self._mostrar_preview()
         self._actualizar_botones()
 
@@ -391,11 +420,14 @@ class App(tk.Tk):
             elif nombre in probs:
                 obs = "; ".join(probs[nombre])
                 tags = ("mal",)
+            chk = self.fila_check.get(id(fila), True)   # por defecto: incluido
+            self.fila_check[id(fila)] = chk
             iid = self.tabla.insert("", "end",
-                                    values=(nombre, empresa, banco, clabe or "—",
-                                            monto or "—", obs),
+                                    values=("☑" if chk else "☐", nombre, empresa,
+                                            banco, clabe or "—", monto or "—", obs),
                                     tags=tags)
             self.item_a_fila[iid] = fila
+        self._actualizar_conteo_sel()
         car = "OK" if v["hay_caratulas"] else "carpeta CARATULAS no encontrada"
         vob = "OK" if v["hay_vobo"] else "carpeta VOBO no encontrada"
         nprob = len(v["problemas"])
@@ -406,30 +438,49 @@ class App(tk.Tk):
                   f"Carátulas: {car}   |   Vo.Bo.: {vob}"),
             fg=(COLOR_MAL if nprob else COLOR_OK))
 
-    def quitar_seleccionados(self):
-        """Quita de la lista los registros seleccionados en la vista previa
-        (no se modifican los archivos; solo NO se procesan en esta corrida)."""
-        if self.estado == "corriendo":
+    def _rueda(self, e):
+        """Rueda del mouse: desplaza la ventana, salvo cuando el cursor está
+        sobre la tabla o la bitácora (ahí scrollean ellas)."""
+        w = self.winfo_containing(e.x_root, e.y_root)
+        ruta = str(w) if w is not None else ""
+        if ruta.startswith(str(self.tabla)) or ruta.startswith(str(self.txt)):
             return
-        sel = self.tabla.selection()
-        if not sel:
-            messagebox.showinfo("Quitar registros",
-                                "Selecciona uno o más renglones en la tabla.")
+        try:
+            self._canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+        except Exception:
+            pass
+
+    def _click_tabla(self, event):
+        """Clic en la casilla ✓ de un renglón -> incluye/excluye ese registro."""
+        if self.tabla.identify_region(event.x, event.y) != "cell":
             return
-        if not messagebox.askyesno(
-                "Quitar registros",
-                f"¿Quitar {len(sel)} registro(s) de esta carga?\n\n"
-                "No se borran del archivo; solo no se procesarán ahora."):
+        if self.tabla.identify_column(event.x) != "#1":   # solo la columna 'sel'
             return
-        quitar_ids = {id(self.item_a_fila[i]) for i in sel if i in self.item_a_fila}
-        self.filas = [f for f in self.filas if id(f) not in quitar_ids]
-        # Como cambió la lista, reinicia el avance de esta carga.
-        self.estado = "idle"
-        self.siguiente = 0
-        self.resultados_global = []
-        self._mostrar_preview()
-        self._actualizar_botones()
-        self._log_ui(f"Se quitaron {len(quitar_ids)} registro(s) de la carga.")
+        iid = self.tabla.identify_row(event.y)
+        fila = self.item_a_fila.get(iid)
+        if fila is None:
+            return
+        nuevo = not self.fila_check.get(id(fila), True)
+        self.fila_check[id(fila)] = nuevo
+        self.tabla.set(iid, "sel", "☑" if nuevo else "☐")
+        self._actualizar_conteo_sel()
+        return "break"
+
+    def _toggle_todos(self):
+        """Casilla 'Seleccionar todos': marca/desmarca todos los renglones."""
+        val = self.var_todos.get()
+        for iid, fila in self.item_a_fila.items():
+            self.fila_check[id(fila)] = val
+            self.tabla.set(iid, "sel", "☑" if val else "☐")
+        self._actualizar_conteo_sel()
+
+    def _actualizar_conteo_sel(self):
+        if not self.filas:
+            self.lbl_sel.config(text="")
+            return
+        n = sum(1 for f in self.filas if self.fila_check.get(id(f), True))
+        self.lbl_sel.config(
+            text=f"Seleccionados para procesar: {n} de {len(self.filas)}")
 
     # ------------------------------------------------------------------ #
     #  Ejecutar el robot
@@ -483,11 +534,16 @@ class App(tk.Tk):
             return None
         return u, p
 
-    def _confirmar_inicio(self):
-        con_monto = sum(1 for f in self.filas
+    def _seleccionados(self):
+        """Filas marcadas con la casilla ✓ (las que se van a procesar)."""
+        return [f for f in (self.filas or [])
+                if self.fila_check.get(id(f), True)]
+
+    def _confirmar_inicio(self, seleccion):
+        con_monto = sum(1 for f in seleccion
                         if sipp_rpa.limpiar_monto(sipp_rpa.campo_monto(f)))
         faltan = [sipp_rpa.campo(f, "EX-COLABORADOR (DESCRIPCIÓN)", "NOMBRE DE CUENTA")
-                  for f in self.filas
+                  for f in seleccion
                   if sipp_rpa.limpiar_monto(sipp_rpa.campo_monto(f))
                   and not sipp_rpa.buscar_caratula(
                       sipp_rpa.campo(f, "EX-COLABORADOR (DESCRIPCIÓN)", "NOMBRE DE CUENTA"))]
@@ -504,12 +560,22 @@ class App(tk.Tk):
 
     def iniciar(self):
         cred = self._credenciales()
-        if not cred or not self._confirmar_inicio():
+        if not cred:
+            return
+        seleccion = self._seleccionados()
+        if not seleccion:
+            messagebox.showwarning(
+                "Sin selección",
+                "Marca al menos un registro (casilla ✓) para procesar.")
+            return
+        if not self._confirmar_inicio(seleccion):
             return
         self.usuario, self.contrasena = cred
+        self.filas_run = seleccion
         self.siguiente = 0
         self.resultados_global = []
-        self._log_ui("=== Iniciando desde el primer registro ===")
+        self._log_ui(f"=== Iniciando ({len(seleccion)} registro(s) "
+                     f"seleccionados) ===")
         self._arrancar()
 
     def reanudar(self):
@@ -524,6 +590,12 @@ class App(tk.Tk):
         cred = self._credenciales()
         if not cred:
             return
+        seleccion = self._seleccionados()
+        if not seleccion:
+            messagebox.showwarning(
+                "Sin selección",
+                "Marca al menos un registro (casilla ✓) para procesar.")
+            return
         if not messagebox.askyesno(
                 "Reiniciar carga",
                 "Se volverá a empezar desde el PRIMER registro.\n\n"
@@ -532,6 +604,7 @@ class App(tk.Tk):
                 "¿Continuar?"):
             return
         self.usuario, self.contrasena = cred
+        self.filas_run = seleccion
         self.siguiente = 0
         self.resultados_global = []
         self._log_ui("=== Reiniciando carga desde el primer registro ===")
@@ -542,7 +615,7 @@ class App(tk.Tk):
         self.detener_flag.clear()
         self.estado = "corriendo"
         self._actualizar_botones()
-        self.barra.config(maximum=max(1, len(self.filas)), value=self.siguiente)
+        self.barra.config(maximum=max(1, len(self.filas_run)), value=self.siguiente)
         inicio = self.siguiente
         self.worker = threading.Thread(
             target=self._correr, args=(inicio,), daemon=True)
@@ -551,7 +624,7 @@ class App(tk.Tk):
     def _correr(self, inicio):
         try:
             resumen = sipp_rpa.procesar(
-                self.usuario, self.contrasena, self.filas[inicio:],
+                self.usuario, self.contrasena, self.filas_run[inicio:],
                 on_progreso=lambda d: self.cola.put(("prog", {**d, "offset": inicio})),
                 detener=self.detener_flag.is_set,
                 escribir_rep=False)
@@ -588,7 +661,7 @@ class App(tk.Tk):
                     absoluto = dato.get("offset", 0) + dato.get("i", 0)
                     self.barra.config(value=absoluto)
                     self.lbl_estado.config(
-                        text=f"{absoluto}/{len(self.filas)} {dato.get('estado','')}")
+                        text=f"{absoluto}/{len(self.filas_run)} {dato.get('estado','')}")
                 elif tipo == "fin":
                     self._terminar(dato)
                 elif tipo == "error":
@@ -607,7 +680,7 @@ class App(tk.Tk):
         r = resumen
         # Los resultados ya se fueron acumulando EN VIVO (self.resultados_global);
         # self.siguiente = cuántos se han procesado en total.
-        detenido = r.get("detenido", False) and self.siguiente < len(self.filas)
+        detenido = r.get("detenido", False) and self.siguiente < len(self.filas_run)
         self.estado = "detenido" if detenido else "fin"
         self._actualizar_botones()
 
@@ -617,7 +690,7 @@ class App(tk.Tk):
         estado_txt = "Detenido" if detenido else "Terminado"
         self.lbl_estado.config(text=estado_txt)
         rep = sipp_rpa.escribir_reporte(self.resultados_global)
-        msg = (f"{estado_txt}. Procesados {self.siguiente} de {len(self.filas)}.\n\n"
+        msg = (f"{estado_txt}. Procesados {self.siguiente} de {len(self.filas_run)}.\n\n"
                f"Éxitos: {cont.get('OK', 0)}\n"
                f"Cancelados (sin concepto): {cont.get('CANCELADO', 0)}\n"
                f"Revisar: {cont.get('REVISAR', 0)}\n"
