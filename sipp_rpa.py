@@ -104,38 +104,54 @@ def resolver_descripcion(texto, nombre):
     return re.sub(r"NOMBRE DE(?:L)? COLABORADOR", nombre, texto, flags=re.IGNORECASE)
 
 
-def buscar_archivo_por_nombre(carpeta, nombre_colaborador):
-    """Busca en 'carpeta' un archivo (pdf/imagen) cuyo nombre coincida con el
-    colaborador. Devuelve la ruta o None."""
-    if not os.path.isdir(carpeta):
+def _coincide_archivo(ruta, objetivo):
+    """Si el archivo 'ruta' corresponde al colaborador 'objetivo' (normalizado),
+    devuelve su prioridad por extensión; si no, None."""
+    base, ext = os.path.splitext(os.path.basename(ruta))
+    if ext.lower() not in config.EXT_CARATULA:
         return None
+    nbase = normalizar(base)
+    # Coincidencia exacta o por contención (por si el archivo trae sufijos).
+    if nbase == objetivo or objetivo in nbase or nbase in objetivo:
+        return config.EXT_CARATULA.index(ext.lower())
+    return None
 
+
+def buscar_en(carpeta, archivos, nombre_colaborador):
+    """Busca un archivo (pdf/imagen) cuyo nombre coincida con el colaborador,
+    tanto en 'carpeta' (si existe) como en la lista 'archivos' (rutas sueltas
+    que el operador adjuntó). Devuelve la ruta o None."""
     objetivo = normalizar(nombre_colaborador)
-    candidatos = []
-    for nombre_archivo in os.listdir(carpeta):
-        base, ext = os.path.splitext(nombre_archivo)
-        if ext.lower() not in config.EXT_CARATULA:
-            continue
-        nbase = normalizar(base)
-        # Coincidencia exacta o por contención (por si el archivo trae sufijos).
-        if nbase == objetivo or objetivo in nbase or nbase in objetivo:
-            prioridad = config.EXT_CARATULA.index(ext.lower())
-            candidatos.append((prioridad, os.path.join(carpeta, nombre_archivo)))
+    rutas = list(archivos or [])
+    if carpeta and os.path.isdir(carpeta):
+        rutas += [os.path.join(carpeta, n) for n in os.listdir(carpeta)]
 
+    candidatos = []
+    for ruta in rutas:
+        prioridad = _coincide_archivo(ruta, objetivo)
+        if prioridad is not None and os.path.isfile(ruta):
+            candidatos.append((prioridad, ruta))
     if not candidatos:
         return None
     candidatos.sort()
     return candidatos[0][1]
 
 
+def buscar_archivo_por_nombre(carpeta, nombre_colaborador):
+    """(Compatibilidad) Busca solo en una carpeta."""
+    return buscar_en(carpeta, None, nombre_colaborador)
+
+
 def buscar_caratula(nombre_colaborador):
-    """Carátula bancaria (carpeta CARATULAS)."""
-    return buscar_archivo_por_nombre(config.CARPETA_CARATULAS, nombre_colaborador)
+    """Carátula bancaria: carpeta CARATULAS y/o archivos sueltos."""
+    return buscar_en(config.CARPETA_CARATULAS, config.ARCHIVOS_CARATULAS,
+                     nombre_colaborador)
 
 
 def buscar_vobo(nombre_colaborador):
-    """Documento Vo.Bo. de Compras (carpeta VOBO)."""
-    return buscar_archivo_por_nombre(config.CARPETA_VOBO, nombre_colaborador)
+    """Documento Vo.Bo. de Compras: carpeta VOBO y/o archivos sueltos."""
+    return buscar_en(config.CARPETA_VOBO, config.ARCHIVOS_VOBO,
+                     nombre_colaborador)
 
 
 # --------------------------------------------------------------------------- #
@@ -773,8 +789,8 @@ def llenar_solicitud(page, fila):
 
 def validar_datos(filas):
     """Valida las filas y devuelve un resumen para la vista previa de la app."""
-    hay_car = os.path.isdir(config.CARPETA_CARATULAS)
-    hay_vobo = os.path.isdir(config.CARPETA_VOBO)
+    hay_car = os.path.isdir(config.CARPETA_CARATULAS) or bool(config.ARCHIVOS_CARATULAS)
+    hay_vobo = os.path.isdir(config.CARPETA_VOBO) or bool(config.ARCHIVOS_VOBO)
     total = len(filas)
     con_monto = 0
     problemas = []

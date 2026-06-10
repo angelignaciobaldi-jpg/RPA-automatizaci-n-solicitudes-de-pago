@@ -40,6 +40,9 @@ ARCHIVO_CSV = os.path.join(BASE_DIR, "BASE DE DATOS LISTADO 1.csv")
 # Carpeta donde están los archivos de CARÁTULA (uno por colaborador,
 # nombrados por el nombre del colaborador, ej. "ANGEL MORENO AYALA.pdf").
 CARPETA_CARATULAS = os.path.join(BASE_DIR, "CARATULAS")
+# Alternativa: lista de archivos de carátula sueltos (rutas) que el operador
+# adjunta uno por uno en la app. Se busca en la carpeta Y en esta lista.
+ARCHIVOS_CARATULAS = []
 
 # Extensiones válidas de carátula (en orden de preferencia).
 EXT_CARATULA = [".pdf", ".jpg", ".jpeg", ".png"]
@@ -87,6 +90,8 @@ CORREO_ACREEDOR = "acreedoresdeudores@petroil.com.mx"
 # Carpeta de documentos Vo.Bo. del Depto. de Compras (uno por colaborador,
 # nombrado por el nombre del colaborador, igual que las carátulas).
 CARPETA_VOBO = os.path.join(BASE_DIR, "VOBO")
+# Alternativa: lista de archivos de Vo.Bo. sueltos (rutas) adjuntados uno a uno.
+ARCHIVOS_VOBO = []
 
 # --------------------------------------------------------------------------- #
 #  CONFIGURACIÓN DE SESIÓN (pantalla posterior al login)

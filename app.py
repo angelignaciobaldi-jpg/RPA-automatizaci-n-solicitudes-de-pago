@@ -137,17 +137,25 @@ class App(tk.Tk):
         tk.Button(f1, text="Cargar CSV...", width=22, command=self.cargar_csv
                   ).grid(row=0, column=0, padx=6, pady=4, sticky="w")
         self.lbl_csv = tk.Label(f1, text="(ningún archivo cargado)", fg="#555")
-        self.lbl_csv.grid(row=0, column=1, padx=6, sticky="w")
+        self.lbl_csv.grid(row=0, column=1, columnspan=2, padx=6, sticky="w")
+        # Carátulas: por CARPETA o por ARCHIVOS PDF sueltos (cualquiera de las dos).
         tk.Button(f1, text="Carpeta de Carátulas...", width=22,
                   command=self.seleccionar_caratulas
                   ).grid(row=1, column=0, padx=6, pady=4, sticky="w")
+        tk.Button(f1, text="Archivos PDF (carátulas)...", width=24,
+                  command=self.seleccionar_archivos_caratulas
+                  ).grid(row=1, column=1, padx=6, pady=4, sticky="w")
         self.lbl_car = tk.Label(f1, text="(no seleccionada — requerida)", fg="#555")
-        self.lbl_car.grid(row=1, column=1, padx=6, sticky="w")
+        self.lbl_car.grid(row=1, column=2, padx=6, sticky="w")
+        # Vo.Bo.: por CARPETA o por ARCHIVOS PDF sueltos (opcional).
         tk.Button(f1, text="Carpeta de Vo.Bo....", width=22,
                   command=self.seleccionar_vobo
                   ).grid(row=2, column=0, padx=6, pady=4, sticky="w")
+        tk.Button(f1, text="Archivos PDF (Vo.Bo.)...", width=24,
+                  command=self.seleccionar_archivos_vobo
+                  ).grid(row=2, column=1, padx=6, pady=4, sticky="w")
         self.lbl_vobo = tk.Label(f1, text="(opcional — no todos lo tienen)", fg="#555")
-        self.lbl_vobo.grid(row=2, column=1, padx=6, sticky="w")
+        self.lbl_vobo.grid(row=2, column=2, padx=6, sticky="w")
 
         # --- Vista previa ---
         f2 = tk.LabelFrame(self, text="Vista previa", **pad)
@@ -246,10 +254,14 @@ class App(tk.Tk):
         vob = os.path.join(carpeta, "VOBO")
         if os.path.isdir(car):
             config.CARPETA_CARATULAS = car
-            self._lbl_carpeta(self.lbl_car, car)
+            self._actualizar_lbl_archivos(self.lbl_car, car,
+                                          config.ARCHIVOS_CARATULAS,
+                                          "(no seleccionada — requerida)")
         if os.path.isdir(vob):
             config.CARPETA_VOBO = vob
-            self._lbl_carpeta(self.lbl_vobo, vob)
+            self._actualizar_lbl_archivos(self.lbl_vobo, vob,
+                                          config.ARCHIVOS_VOBO,
+                                          "(opcional — no todos lo tienen)")
 
         # CSV nuevo: estado limpio (desde cero).
         self.estado = "idle"
@@ -258,19 +270,53 @@ class App(tk.Tk):
         self._mostrar_preview()
         self._actualizar_botones()
 
+    FILTROS_PDF = [("PDF / imágenes", "*.pdf *.jpg *.jpeg *.png"),
+                   ("Todos los archivos", "*.*")]
+
     def _lbl_carpeta(self, lbl, carpeta):
+        """(Compatibilidad) Muestra solo la carpeta."""
         n = 0
         if os.path.isdir(carpeta):
             n = sum(1 for f in os.listdir(carpeta)
                     if os.path.splitext(f)[1].lower() in config.EXT_CARATULA)
         lbl.config(text=f"{carpeta}  ({n} archivos)", fg="#000")
 
+    def _actualizar_lbl_archivos(self, lbl, carpeta, archivos, vacio_txt):
+        """Muestra el estado combinado: carpeta y/o N archivos PDF sueltos."""
+        partes = []
+        if carpeta and os.path.isdir(carpeta):
+            n = sum(1 for f in os.listdir(carpeta)
+                    if os.path.splitext(f)[1].lower() in config.EXT_CARATULA)
+            nombre = os.path.basename(carpeta.rstrip("\\/")) or carpeta
+            partes.append(f"Carpeta '{nombre}' ({n})")
+        if archivos:
+            partes.append(f"{len(archivos)} archivo(s) PDF")
+        if partes:
+            lbl.config(text="  +  ".join(partes), fg=COLOR_OK)
+        else:
+            lbl.config(text=vacio_txt, fg="#555")
+
     def seleccionar_caratulas(self):
         d = filedialog.askdirectory(title="Carpeta de Carátulas")
         if not d:
             return
         config.CARPETA_CARATULAS = d
-        self._lbl_carpeta(self.lbl_car, d)
+        self._actualizar_lbl_archivos(self.lbl_car, config.CARPETA_CARATULAS,
+                                      config.ARCHIVOS_CARATULAS,
+                                      "(no seleccionada — requerida)")
+        if self.filas:
+            self._mostrar_preview()
+        self._actualizar_botones()
+
+    def seleccionar_archivos_caratulas(self):
+        archivos = filedialog.askopenfilenames(
+            title="Archivos PDF de carátulas", filetypes=self.FILTROS_PDF)
+        if not archivos:
+            return
+        config.ARCHIVOS_CARATULAS = list(archivos)
+        self._actualizar_lbl_archivos(self.lbl_car, config.CARPETA_CARATULAS,
+                                      config.ARCHIVOS_CARATULAS,
+                                      "(no seleccionada — requerida)")
         if self.filas:
             self._mostrar_preview()
         self._actualizar_botones()
@@ -280,7 +326,21 @@ class App(tk.Tk):
         if not d:
             return
         config.CARPETA_VOBO = d
-        self._lbl_carpeta(self.lbl_vobo, d)
+        self._actualizar_lbl_archivos(self.lbl_vobo, config.CARPETA_VOBO,
+                                      config.ARCHIVOS_VOBO,
+                                      "(opcional — no todos lo tienen)")
+        if self.filas:
+            self._mostrar_preview()
+
+    def seleccionar_archivos_vobo(self):
+        archivos = filedialog.askopenfilenames(
+            title="Archivos PDF de Vo.Bo.", filetypes=self.FILTROS_PDF)
+        if not archivos:
+            return
+        config.ARCHIVOS_VOBO = list(archivos)
+        self._actualizar_lbl_archivos(self.lbl_vobo, config.CARPETA_VOBO,
+                                      config.ARCHIVOS_VOBO,
+                                      "(opcional — no todos lo tienen)")
         if self.filas:
             self._mostrar_preview()
 
@@ -320,7 +380,8 @@ class App(tk.Tk):
     # ------------------------------------------------------------------ #
     def _actualizar_botones(self, *_):
         listo = (self.filas is not None
-                 and os.path.isdir(config.CARPETA_CARATULAS))
+                 and (os.path.isdir(config.CARPETA_CARATULAS)
+                      or bool(config.ARCHIVOS_CARATULAS)))
         e = self.estado
         self.btn_iniciar.config(
             state="normal" if (listo and e == "idle") else "disabled")
