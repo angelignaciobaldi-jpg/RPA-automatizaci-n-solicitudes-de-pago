@@ -134,10 +134,17 @@ class App(tk.Tk):
         # --- Paso 1: Archivos (CSV + carpetas de carátulas y Vo.Bo.) ---
         f1 = tk.LabelFrame(self, text="1) Archivos", **pad)
         f1.pack(fill="x", **pad)
-        tk.Button(f1, text="Cargar CSV...", width=22, command=self.cargar_csv
-                  ).grid(row=0, column=0, padx=6, pady=4, sticky="w")
+        fmt = tk.Frame(f1)
+        fmt.grid(row=0, column=0, sticky="w", padx=6, pady=4)
+        tk.Label(fmt, text="Formato:").pack(side="left")
+        self.var_formato = tk.StringVar(value="CSV")
+        ttk.Combobox(fmt, textvariable=self.var_formato, values=["CSV", "Excel"],
+                     width=7, state="readonly").pack(side="left", padx=4)
+        tk.Button(f1, text="Cargar base de datos...", width=22,
+                  command=self.cargar_base
+                  ).grid(row=0, column=1, padx=6, pady=4, sticky="w")
         self.lbl_csv = tk.Label(f1, text="(ningún archivo cargado)", fg="#555")
-        self.lbl_csv.grid(row=0, column=1, columnspan=2, padx=6, sticky="w")
+        self.lbl_csv.grid(row=0, column=2, padx=6, sticky="w")
         # Carátulas: por CARPETA o por ARCHIVOS PDF sueltos (cualquiera de las dos).
         tk.Button(f1, text="Carpeta de Carátulas...", width=22,
                   command=self.seleccionar_caratulas
@@ -231,20 +238,30 @@ class App(tk.Tk):
         logging.getLogger("rpa").addHandler(h)
 
     # ------------------------------------------------------------------ #
-    #  Cargar y validar el CSV
+    #  Cargar y validar la base de datos (CSV o Excel)
     # ------------------------------------------------------------------ #
-    def cargar_csv(self):
-        ruta = filedialog.askopenfilename(
-            title="Selecciona el CSV", filetypes=[("CSV", "*.csv"), ("Todos", "*.*")])
+    def cargar_base(self):
+        es_excel = self.var_formato.get() == "Excel"
+        if es_excel:
+            filtros = [("Excel", "*.xlsx *.xlsm *.xls"), ("Todos", "*.*")]
+            titulo = "Selecciona el archivo de Excel"
+        else:
+            filtros = [("CSV", "*.csv"), ("Todos", "*.*")]
+            titulo = "Selecciona el archivo CSV"
+        ruta = filedialog.askopenfilename(title=titulo, filetypes=filtros)
         if not ruta:
             return
         carpeta = os.path.dirname(ruta)
         config.ARCHIVO_CSV = ruta
         config.CARPETA_LOGS = os.path.join(carpeta, "logs")
         try:
-            self.filas = sipp_rpa.leer_csv(ruta)
+            self.filas = sipp_rpa.leer_base(ruta)
         except Exception as e:
-            messagebox.showerror("Error al leer el CSV", str(e))
+            messagebox.showerror("Error al leer la base de datos", str(e))
+            return
+        if not self.filas:
+            messagebox.showwarning("Sin datos",
+                                   "El archivo no tiene registros legibles.")
             return
         self.ruta_csv = ruta
         self.lbl_csv.config(text=os.path.basename(ruta), fg="#000")

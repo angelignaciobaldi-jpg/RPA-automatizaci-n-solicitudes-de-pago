@@ -85,6 +85,62 @@ def leer_csv(ruta):
     return filas
 
 
+def _celda_a_texto(v):
+    """Convierte el valor de una celda de Excel a texto, igual que vendría del
+    CSV (fechas dd/mm/aaaa, números sin notación científica ni '.0')."""
+    import datetime as _dt
+    if v is None:
+        return ""
+    if isinstance(v, bool):
+        return "Sí" if v else "No"
+    if isinstance(v, (_dt.datetime, _dt.date)):
+        return v.strftime("%d/%m/%Y")
+    if isinstance(v, float):
+        return str(int(v)) if v.is_integer() else str(v)
+    if isinstance(v, int):
+        return str(v)
+    return str(v).strip()
+
+
+def leer_excel(ruta):
+    """Lee un Excel (.xlsx) y devuelve la MISMA estructura que leer_csv:
+    lista de diccionarios con claves normalizadas y valores en texto."""
+    try:
+        from openpyxl import load_workbook
+    except ImportError:
+        raise RuntimeError(
+            "Esta versión del programa no incluye soporte de Excel.\n"
+            "Actualiza/reinstala el programa, o guarda tu archivo como CSV.")
+    if not os.path.exists(ruta):
+        raise FileNotFoundError(f"No se encontró el Excel: {ruta}")
+
+    wb = load_workbook(ruta, data_only=True, read_only=True)
+    ws = wb.active
+    filas, encabezados = [], None
+    for celdas in ws.iter_rows(values_only=True):
+        valores = [_celda_a_texto(c) for c in celdas]
+        if encabezados is None:
+            if any(v.strip() for v in valores):       # 1ª fila no vacía = encabezados
+                encabezados = [normalizar(v) for v in valores]
+            continue
+        if not any(v.strip() for v in valores):       # ignora filas vacías
+            continue
+        fila = {k: v.strip() for k, v in zip(encabezados, valores) if k}
+        if any(fila.values()):
+            filas.append(fila)
+    wb.close()
+    return filas
+
+
+def leer_base(ruta):
+    """Lee la base de datos eligiendo el lector según la extensión
+    (.csv -> leer_csv, .xlsx/.xls/.xlsm -> leer_excel)."""
+    ext = os.path.splitext(ruta)[1].lower()
+    if ext in (".xlsx", ".xlsm", ".xls"):
+        return leer_excel(ruta)
+    return leer_csv(ruta)
+
+
 def campo(fila, *nombres):
     """Devuelve el primer campo que exista (comparando normalizado)."""
     for n in nombres:

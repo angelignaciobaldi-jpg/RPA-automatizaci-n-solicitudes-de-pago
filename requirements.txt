@@ -1,3 +1,4 @@
 # Dependencias del RPA de Solicitudes de Pago (SIPP)
 # Sin versión fija: usa la última, que trae binarios para Python 3.14.
 playwright
+openpyxl   # lectura de bases de datos en Excel (.xlsx)

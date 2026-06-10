@@ -35,6 +35,10 @@ try:
     from playwright.sync_api import sync_playwright  # noqa: F401
 except Exception:
     pass
+try:
+    import openpyxl  # noqa: F401  (lectura de Excel)
+except Exception:
+    pass
 # ---------------------------------------------------------------------------
 
 REPO = "angelignaciobaldi-jpg/RPA-automatizaci-n-solicitudes-de-pago"
