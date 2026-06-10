@@ -170,11 +170,11 @@ class App(tk.Tk):
         self.lbl_resumen = tk.Label(f2, text="Carga un CSV para ver el resumen.",
                                     anchor="w", justify="left")
         self.lbl_resumen.pack(fill="x")
-        cols = ("col", "empresa", "banco", "monto", "obs")
+        cols = ("col", "empresa", "banco", "clabe", "monto", "obs")
         self.tabla = ttk.Treeview(f2, columns=cols, show="headings", height=10)
-        for c, t, w in [("col", "Colaborador", 240), ("empresa", "Empresa", 110),
-                        ("banco", "Banco", 110), ("monto", "Monto", 100),
-                        ("obs", "Observaciones", 320)]:
+        for c, t, w in [("col", "Colaborador", 200), ("empresa", "Empresa", 100),
+                        ("banco", "Banco", 100), ("clabe", "CLABE", 160),
+                        ("monto", "Monto", 90), ("obs", "Observaciones", 210)]:
             self.tabla.heading(c, text=t)
             self.tabla.column(c, width=w, anchor="w")
         self.tabla.tag_configure("mal", foreground=COLOR_MAL)
@@ -370,6 +370,7 @@ class App(tk.Tk):
             nombre = sipp_rpa.campo(fila, "EX-COLABORADOR (DESCRIPCIÓN)", "NOMBRE DE CUENTA")
             empresa = sipp_rpa.campo(fila, "EMPRESA")
             banco = sipp_rpa.campo(fila, "BANCOS")
+            clabe = sipp_rpa.campo(fila, "CLAVE INTERBANCARIA", "CLABE")
             monto = sipp_rpa.campo(fila, "MONTO").strip()
             tags = ()
             obs = ""
@@ -380,7 +381,8 @@ class App(tk.Tk):
                 obs = "; ".join(probs[nombre])
                 tags = ("mal",)
             self.tabla.insert("", "end",
-                              values=(nombre, empresa, banco, monto or "—", obs),
+                              values=(nombre, empresa, banco, clabe or "—",
+                                      monto or "—", obs),
                               tags=tags)
         car = "OK" if v["hay_caratulas"] else "carpeta CARATULAS no encontrada"
         vob = "OK" if v["hay_vobo"] else "carpeta VOBO no encontrada"
