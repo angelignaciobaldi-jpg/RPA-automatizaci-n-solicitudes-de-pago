@@ -170,6 +170,14 @@ class App(tk.Tk):
         self.lbl_resumen = tk.Label(f2, text="Carga un CSV para ver el resumen.",
                                     anchor="w", justify="left")
         self.lbl_resumen.pack(fill="x")
+        # Barra para quitar registros antes de ejecutar.
+        barra_prev = tk.Frame(f2)
+        barra_prev.pack(fill="x", side="bottom")
+        tk.Button(barra_prev, text="🗑 Quitar seleccionado(s)",
+                  command=self.quitar_seleccionados).pack(side="left", pady=2)
+        tk.Label(barra_prev, fg="#777",
+                 text="  (selecciona filas y quítalas para NO procesarlas; "
+                      "también con la tecla Supr)").pack(side="left")
         cols = ("col", "empresa", "banco", "clabe", "monto", "obs")
         self.tabla = ttk.Treeview(f2, columns=cols, show="headings", height=10)
         for c, t, w in [("col", "Colaborador", 200), ("empresa", "Empresa", 100),
@@ -183,6 +191,8 @@ class App(tk.Tk):
         self.tabla.configure(yscrollcommand=sb.set)
         self.tabla.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
+        self.tabla.bind("<Delete>", lambda e: self.quitar_seleccionados())
+        self.item_a_fila = {}   # iid del Treeview -> fila (para quitar)
 
         # --- Paso 2: credenciales y opciones ---
         f3 = tk.LabelFrame(self, text="2) Credenciales SIPP", **pad)
@@ -364,6 +374,7 @@ class App(tk.Tk):
     def _mostrar_preview(self):
         for it in self.tabla.get_children():
             self.tabla.delete(it)
+        self.item_a_fila = {}
         v = sipp_rpa.validar_datos(self.filas)
         probs = {n: e for n, e in v["problemas"]}
         for fila in self.filas:
@@ -371,7 +382,7 @@ class App(tk.Tk):
             empresa = sipp_rpa.campo(fila, "EMPRESA")
             banco = sipp_rpa.campo(fila, "BANCOS")
             clabe = sipp_rpa.campo(fila, "CLAVE INTERBANCARIA", "CLABE")
-            monto = sipp_rpa.campo(fila, "MONTO").strip()
+            monto = sipp_rpa.campo_monto(fila).strip()
             tags = ()
             obs = ""
             if not sipp_rpa.limpiar_monto(monto):
@@ -380,10 +391,11 @@ class App(tk.Tk):
             elif nombre in probs:
                 obs = "; ".join(probs[nombre])
                 tags = ("mal",)
-            self.tabla.insert("", "end",
-                              values=(nombre, empresa, banco, clabe or "—",
-                                      monto or "—", obs),
-                              tags=tags)
+            iid = self.tabla.insert("", "end",
+                                    values=(nombre, empresa, banco, clabe or "—",
+                                            monto or "—", obs),
+                                    tags=tags)
+            self.item_a_fila[iid] = fila
         car = "OK" if v["hay_caratulas"] else "carpeta CARATULAS no encontrada"
         vob = "OK" if v["hay_vobo"] else "carpeta VOBO no encontrada"
         nprob = len(v["problemas"])
@@ -393,6 +405,31 @@ class App(tk.Tk):
                   f"Con observaciones: {nprob}\n"
                   f"Carátulas: {car}   |   Vo.Bo.: {vob}"),
             fg=(COLOR_MAL if nprob else COLOR_OK))
+
+    def quitar_seleccionados(self):
+        """Quita de la lista los registros seleccionados en la vista previa
+        (no se modifican los archivos; solo NO se procesan en esta corrida)."""
+        if self.estado == "corriendo":
+            return
+        sel = self.tabla.selection()
+        if not sel:
+            messagebox.showinfo("Quitar registros",
+                                "Selecciona uno o más renglones en la tabla.")
+            return
+        if not messagebox.askyesno(
+                "Quitar registros",
+                f"¿Quitar {len(sel)} registro(s) de esta carga?\n\n"
+                "No se borran del archivo; solo no se procesarán ahora."):
+            return
+        quitar_ids = {id(self.item_a_fila[i]) for i in sel if i in self.item_a_fila}
+        self.filas = [f for f in self.filas if id(f) not in quitar_ids]
+        # Como cambió la lista, reinicia el avance de esta carga.
+        self.estado = "idle"
+        self.siguiente = 0
+        self.resultados_global = []
+        self._mostrar_preview()
+        self._actualizar_botones()
+        self._log_ui(f"Se quitaron {len(quitar_ids)} registro(s) de la carga.")
 
     # ------------------------------------------------------------------ #
     #  Ejecutar el robot
@@ -448,10 +485,10 @@ class App(tk.Tk):
 
     def _confirmar_inicio(self):
         con_monto = sum(1 for f in self.filas
-                        if sipp_rpa.limpiar_monto(sipp_rpa.campo(f, "MONTO")))
+                        if sipp_rpa.limpiar_monto(sipp_rpa.campo_monto(f)))
         faltan = [sipp_rpa.campo(f, "EX-COLABORADOR (DESCRIPCIÓN)", "NOMBRE DE CUENTA")
                   for f in self.filas
-                  if sipp_rpa.limpiar_monto(sipp_rpa.campo(f, "MONTO"))
+                  if sipp_rpa.limpiar_monto(sipp_rpa.campo_monto(f))
                   and not sipp_rpa.buscar_caratula(
                       sipp_rpa.campo(f, "EX-COLABORADOR (DESCRIPCIÓN)", "NOMBRE DE CUENTA"))]
         if faltan and not messagebox.askyesno(

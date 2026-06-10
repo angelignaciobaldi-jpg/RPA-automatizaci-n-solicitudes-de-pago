@@ -150,6 +150,19 @@ def campo(fila, *nombres):
     return ""
 
 
+def campo_monto(fila):
+    """Devuelve el importe a pagar. Acepta varios nombres de columna
+    ('MONTO', 'MONTO A PAGAR', 'IMPORTE', etc.) y, si no, cualquier columna
+    cuyo nombre contenga 'MONTO' o 'IMPORTE'."""
+    v = campo(fila, "MONTO", "MONTO A PAGAR", "IMPORTE", "IMPORTE A PAGAR")
+    if v:
+        return v
+    for clave, valor in fila.items():
+        if ("MONTO" in clave or "IMPORTE" in clave) and valor:
+            return valor
+    return ""
+
+
 def limpiar_monto(valor):
     """Quita '$', comas y espacios de un importe -> número plano ('1000.00')."""
     return (valor or "").replace("$", "").replace(",", "").strip()
@@ -834,7 +847,7 @@ def llenar_solicitud(page, fila):
 
     # 7) Importe en 'Conceptos de Pago' ('Cantidad a Pagar' está deshabilitada
     #    en Pago Extraordinario).
-    monto = limpiar_monto(campo(fila, "MONTO"))
+    monto = limpiar_monto(campo_monto(fila))
     if monto:
         llenar_concepto_pago(page, monto)
     else:
@@ -866,7 +879,7 @@ def validar_datos(filas):
         clabe = campo(fila, "CLAVE INTERBANCARIA")
         if not (clabe.isdigit() and len(clabe) == 18):
             errs.append(f"CLABE inválida ({len(clabe)} dígitos)")
-        monto_txt = campo(fila, "MONTO")
+        monto_txt = campo_monto(fila)
         monto = limpiar_monto(monto_txt)
         if monto:
             con_monto += 1
@@ -935,7 +948,7 @@ def procesar(usuario, contrasena, filas, on_progreso=None, detener=None,
                 nombre = campo(fila, "EX-COLABORADOR (DESCRIPCIÓN)", "NOMBRE DE CUENTA")
                 empresa = campo(fila, "EMPRESA")
                 banco = campo(fila, "BANCOS")
-                monto_txt = campo(fila, "MONTO").strip()
+                monto_txt = campo_monto(fila).strip()
                 log.info("----- Registro %d/%d: %s -----", i, total, nombre)
                 avisar(i=i, total=total, nombre=nombre, estado="procesando")
 
