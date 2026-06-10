@@ -226,25 +226,55 @@ def buscar_vobo(nombre_colaborador):
 # --------------------------------------------------------------------------- #
 #  HELPERS DE INTERFAZ (Playwright + plugin "chosen" de SIPP)
 # --------------------------------------------------------------------------- #
-def seleccionar_chosen(page, select_locator, texto, descripcion):
+def seleccionar_chosen(page, select_locator, texto, descripcion, intentos=4):
     """Selecciona una opción en una lista 'chosen' de SIPP.
 
-    El <select> nativo está oculto; junto a él hay un widget 'chosen' que es
-    con el que interactúa el usuario. Abrimos el widget, escribimos el texto
-    en su buscador y damos clic en el resultado.
+    El <select> nativo está oculto; junto a él hay un widget 'chosen'. Abrimos
+    el widget, escribimos el texto en su buscador y damos clic en el resultado.
+
+    Robustez (equipos lentos / listas dependientes como 'Tipo de Pago
+    Extraordinario', que se llena DESPUÉS de elegir el campo padre):
+      1) Espera a que el <select> ya tenga la opción buscada (opciones cargadas).
+      2) Reintenta varias veces: si el desplegable aún no muestra la opción,
+         lo cierra (Escape), espera y lo vuelve a abrir.
     """
     log.info("   - %s = '%s'", descripcion, texto)
     select_locator.wait_for(state="attached", timeout=config.TIMEOUT_MS)
+
+    # 1) Espera a que la opción exista en el <select> (aunque esté oculto).
+    try:
+        select_locator.locator("option", has_text=texto).first.wait_for(
+            state="attached", timeout=config.TIMEOUT_MS)
+    except PWTimeout:
+        pass  # algunas listas no traen <option> precargada; seguimos igual
+
     contenedor = select_locator.locator(
-        "xpath=following-sibling::div[contains(@class,'chosen-container')][1]"
-    )
-    contenedor.scroll_into_view_if_needed()
-    contenedor.click()
-    buscador = contenedor.locator("input.chosen-search-input")
-    buscador.fill(texto)
-    opcion = contenedor.locator("li.active-result", has_text=texto).first
-    opcion.wait_for(state="visible", timeout=config.TIMEOUT_MS)
-    opcion.click()
+        "xpath=following-sibling::div[contains(@class,'chosen-container')][1]")
+    contenedor.wait_for(state="visible", timeout=config.TIMEOUT_MS)
+
+    ultimo = None
+    for intento in range(1, intentos + 1):
+        try:
+            contenedor.scroll_into_view_if_needed()
+            contenedor.click()
+            buscador = contenedor.locator("input.chosen-search-input")
+            buscador.fill(texto)
+            opcion = contenedor.locator("li.active-result", has_text=texto).first
+            opcion.wait_for(state="visible", timeout=6000)
+            opcion.click()
+            return
+        except Exception as e:
+            ultimo = e
+            log.warning("   (reintento %d/%d en '%s'…)", intento, intentos,
+                        descripcion)
+            try:
+                page.keyboard.press("Escape")
+            except Exception:
+                pass
+            page.wait_for_timeout(1200)
+    raise RuntimeError(
+        f"No se pudo seleccionar '{texto}' en '{descripcion}' "
+        f"(la lista no cargó la opción a tiempo): {ultimo}")
 
 
 def cerrar_alertas(page):
