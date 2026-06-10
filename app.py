@@ -51,6 +51,12 @@ config.PAUSAR_ANTES_DE_GUARDAR = False
 COLOR_OK = "#1a7f37"
 COLOR_MAL = "#bb0000"
 
+# Repo para avisar de nuevas versiones (mismo que usa el lanzador).
+REPO_GH = "angelignaciobaldi-jpg/RPA-automatizaci-n-solicitudes-de-pago"
+RAMA_GH = "main"
+API_COMMITS = f"https://api.github.com/repos/{REPO_GH}/commits/{RAMA_GH}"
+INTERVALO_UPDATE_MS = 180000   # revisa cada 3 minutos
+
 
 class HandlerCola(logging.Handler):
     """Manda los mensajes del log a una cola para mostrarlos en la ventana."""
@@ -88,6 +94,10 @@ class App(tk.Tk):
         self._enganchar_log()
         self.after(150, self._drenar_cola)
         self._avisar_actualizacion()
+        # Aviso de nueva versión: revisa GitHub periódicamente (en 2º plano).
+        self.version_actual = None          # SHA del último commit conocido
+        self.aviso_update_visible = False
+        self.after(4000, self._chequear_actualizacion)
 
     def _avisar_actualizacion(self):
         """Muestra en el log si el lanzador actualizó código desde GitHub."""
@@ -103,6 +113,121 @@ class App(tk.Tk):
                          f"código nuevos/actualizados desde GitHub.")
         else:
             self._log_ui("Código verificado con GitHub: ya estaba al día.")
+
+    # ------------------------------------------------------------------ #
+    #  Aviso de nueva versión disponible
+    # ------------------------------------------------------------------ #
+    def _chequear_actualizacion(self):
+        """Cada cierto tiempo, revisa en 2º plano si hay una versión nueva."""
+        threading.Thread(target=self._hilo_chequeo, daemon=True).start()
+        self.after(INTERVALO_UPDATE_MS, self._chequear_actualizacion)
+
+    def _hilo_chequeo(self):
+        sha = self._obtener_sha_remoto()
+        if sha:
+            self.cola.put(("version", sha))
+
+    @staticmethod
+    def _obtener_sha_remoto():
+        """Devuelve el SHA del último commit en GitHub, o None si no hay red."""
+        try:
+            import json
+            import urllib.request
+            req = urllib.request.Request(
+                API_COMMITS, headers={"User-Agent": "RPA-SIPP",
+                                      "Accept": "application/vnd.github.sha"})
+            with urllib.request.urlopen(req, timeout=12) as r:
+                cuerpo = r.read().decode().strip()
+            # Con Accept sha devuelve el hash plano; por si acaso, soporta JSON.
+            if cuerpo.startswith("{"):
+                return json.loads(cuerpo).get("sha")
+            return cuerpo or None
+        except Exception:
+            return None
+
+    def _on_version(self, sha):
+        """Llega un SHA del repo. Fija la versión base o avisa si cambió."""
+        if self.version_actual is None:
+            self.version_actual = sha          # versión con la que se abrió
+            return
+        if sha == self.version_actual or self.aviso_update_visible:
+            return
+        if self.estado == "corriendo":
+            return   # no interrumpir un proceso en curso; avisa al terminar
+        self._mostrar_aviso_update(sha)
+
+    def _mostrar_aviso_update(self, sha):
+        self.aviso_update_visible = True
+        win = tk.Toplevel(self)
+        win.title("Actualización disponible")
+        win.transient(self)
+        win.resizable(False, False)
+        try:
+            win.grab_set()
+        except Exception:
+            pass
+        tk.Label(win, text="🔄  Hay una nueva versión del programa",
+                 font=("Segoe UI", 11, "bold"), fg="#00437f"
+                 ).pack(padx=24, pady=(18, 4))
+        tk.Label(win, justify="center",
+                 text=("Se publicó una actualización.\n"
+                       "'Actualizar ahora' reinicia la app para aplicarla.\n"
+                       "'Enterado' cierra este aviso y sigues trabajando.")
+                 ).pack(padx=24, pady=(0, 14))
+
+        def actualizar():
+            win.destroy()
+            self._actualizar_ahora()
+
+        def enterado():
+            # No volver a avisar por ESTA versión; una futura sí avisará.
+            self.version_actual = sha
+            self.aviso_update_visible = False
+            win.destroy()
+
+        btns = tk.Frame(win)
+        btns.pack(pady=(0, 16))
+        tk.Button(btns, text="🔄  Actualizar ahora", bg="#00437f", fg="white",
+                  font=("Segoe UI", 10, "bold"), width=18,
+                  command=actualizar).pack(side="left", padx=8)
+        tk.Button(btns, text="Enterado", width=12,
+                  command=enterado).pack(side="left", padx=8)
+        win.protocol("WM_DELETE_WINDOW", enterado)
+        win.update_idletasks()
+        # Centra sobre la ventana principal.
+        try:
+            x = self.winfo_rootx() + (self.winfo_width() - win.winfo_width()) // 2
+            y = self.winfo_rooty() + 120
+            win.geometry(f"+{max(0, x)}+{max(0, y)}")
+        except Exception:
+            pass
+
+    def _actualizar_ahora(self):
+        """Cierra y vuelve a abrir la app (el lanzador baja la versión nueva)."""
+        if self.estado == "corriendo":
+            if not messagebox.askyesno(
+                    "Proceso en curso",
+                    "Hay un registro en proceso. Si actualizas ahora se "
+                    "interrumpirá.\n¿Continuar de todas formas?"):
+                self.aviso_update_visible = False
+                return
+            self.detener_flag.set()
+        try:
+            import subprocess
+            if getattr(sys, "frozen", False):
+                subprocess.Popen([sys.executable])
+            else:
+                subprocess.Popen([sys.executable, os.path.abspath(sys.argv[0])])
+        except Exception as e:
+            messagebox.showerror("Error",
+                                 f"No se pudo reiniciar automáticamente:\n{e}")
+            self.aviso_update_visible = False
+            return
+        try:
+            self.destroy()
+        except Exception:
+            pass
+        os._exit(0)
 
     # ------------------------------------------------------------------ #
     #  Construcción de la interfaz
@@ -690,6 +815,8 @@ class App(tk.Tk):
                     self._terminar(dato)
                 elif tipo == "error":
                     self._terminar(None, error=dato)
+                elif tipo == "version":
+                    self._on_version(dato)
         except queue.Empty:
             pass
         self.after(150, self._drenar_cola)
