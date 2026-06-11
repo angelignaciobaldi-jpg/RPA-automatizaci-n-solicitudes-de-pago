@@ -360,6 +360,13 @@ class App(tk.Tk):
         self.var_visible = tk.BooleanVar(value=True)
         tk.Checkbutton(f3, text="Mostrar navegador", variable=self.var_visible
                        ).grid(row=0, column=4, padx=12)
+        # Mantener en estatus GUARDADO: no envía a autorizar (para validar antes).
+        self.var_solo_guardar = tk.BooleanVar(value=False)
+        tk.Checkbutton(
+            f3, fg="#00437f",
+            text="Mantener en estatus guardado (NO enviar a autorizar)",
+            variable=self.var_solo_guardar
+        ).grid(row=1, column=0, columnspan=5, padx=8, pady=(0, 4), sticky="w")
 
         # --- Paso 3: ejecutar ---
         f4 = tk.Frame(cuerpo)
@@ -702,10 +709,15 @@ class App(tk.Tk):
                 f"fallarán al guardar.\nEjemplo: {faltan[0]}\n\n"
                 f"¿Continuar de todas formas?"):
             return False
+        if self.var_solo_guardar.get():
+            modo = ("\n\nModo: se GUARDAN en estatus 'guardado' "
+                    "(NO se envían a autorizar).")
+        else:
+            modo = "\n\nModo: se guardan y se ENVÍAN a autorizar."
         return messagebox.askyesno(
             f"Confirmar ejecución en {config.AMBIENTE}",
             f"Se registrarán {con_monto} solicitudes de pago en "
-            f"{config.AMBIENTE}.\n\n¿Deseas continuar?")
+            f"{config.AMBIENTE}.{modo}\n\n¿Deseas continuar?")
 
     def iniciar(self):
         cred = self._credenciales()
@@ -761,6 +773,8 @@ class App(tk.Tk):
 
     def _arrancar(self):
         config.NAVEGADOR_VISIBLE = self.var_visible.get()
+        # Si el operador eligió "mantener en guardado", NO se envía a autorizar.
+        config.SOLICITAR_AUTORIZACION = not self.var_solo_guardar.get()
         self.detener_flag.clear()
         self.estado = "corriendo"
         self._actualizar_botones()

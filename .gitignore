@@ -1,7 +1,11 @@
 # === Datos sensibles (NUNCA subir a GitHub) ===
 *.csv
+*.xlsx
+*.xls
+*.xlsm
 CARATULAS/
 VOBO/
+RECIBOS FIRMADOS/
 logs/
 HTML PAGES/
 
