@@ -67,8 +67,9 @@ PAUSAR_ANTES_DE_GUARDAR = True
 # "Solicitar Autorización" (envía la solicitud a aprobación).
 SOLICITAR_AUTORIZACION = True
 
-# Tiempo máximo de espera por elemento (milisegundos).
-TIMEOUT_MS = 30000
+# Tiempo máximo de espera por elemento (milisegundos). 60s para tolerar
+# conexiones/equipos lentos y los catálogos grandes de PRODUCCIÓN.
+TIMEOUT_MS = 60000
 
 # --------------------------------------------------------------------------- #
 #  VALORES FIJOS DEL FLUJO (ya definidos contigo)

@@ -23,7 +23,9 @@ import getpass
 import logging
 import os
 import re
+import shutil
 import sys
+import tempfile
 import unicodedata
 from datetime import datetime
 
@@ -226,6 +228,17 @@ def buscar_caratula(nombre_colaborador):
     """Carátula bancaria: carpeta CARATULAS y/o archivos sueltos."""
     return buscar_en(config.CARPETA_CARATULAS, config.ARCHIVOS_CARATULAS,
                      nombre_colaborador)
+
+
+def caratula_de_fila(fila):
+    """Carátula de un registro. Si la fila trae '_CARATULA' (flujo OCR: la
+    carátula ES el documento analizado), usa ese archivo directamente; si no,
+    la busca por nombre en la carpeta/archivos de carátulas."""
+    ruta = fila.get("_CARATULA")
+    if ruta and os.path.isfile(ruta):
+        return ruta
+    return buscar_caratula(
+        campo(fila, "EX-COLABORADOR (DESCRIPCIÓN)", "NOMBRE DE CUENTA"))
 
 
 def buscar_vobo(nombre_colaborador):
@@ -469,9 +482,8 @@ def llenar_cuenta_bancaria(page, fila, panel_acreedor, correo=""):
     if correo and campo_correo.is_visible():
         llenar(page, campo_correo, correo, "Correo (cuenta bancaria)")
 
-    # Carátula (archivo obligatorio).
-    caratula = buscar_caratula(campo(fila, "EX-COLABORADOR (DESCRIPCIÓN)",
-                                     "NOMBRE DE CUENTA"))
+    # Carátula (archivo obligatorio). En el flujo OCR es el propio documento.
+    caratula = caratula_de_fila(fila)
     if caratula:
         log.info("   - Carátula = '%s'", caratula)
         subir_con_reintento(page, page.locator("#ar_CaratulaCB"),
@@ -722,10 +734,31 @@ def _leer_total(page):
     return ""
 
 
+def clic_con_reintento(page, locator, descripcion, intentos=3):
+    """Da clic en un botón con REINTENTO: si la página no responde a tiempo
+    (clic timeout), cierra alertas, espera y vuelve a intentar. Para acciones
+    críticas (Guardar, Solicitar Autorización) en conexiones lentas."""
+    ultimo = None
+    for intento in range(1, intentos + 1):
+        try:
+            locator.first.click(timeout=config.TIMEOUT_MS)
+            return
+        except Exception as e:
+            ultimo = e
+            log.warning("   (reintento clic '%s' %d/%d: la página no respondió)",
+                        descripcion, intento, intentos)
+            cerrar_alertas(page)
+            page.wait_for_timeout(2000)
+    raise RuntimeError(
+        f"No se pudo dar clic en {descripcion} tras {intentos} intentos "
+        f"(la página no respondió a tiempo): {ultimo}")
+
+
 def guardar_solicitud(page):
     """Da clic en 'Guardar' (generarSolicitud) y confirma el diálogo."""
     log.info("   Guardando solicitud...")
-    page.locator("button[ng-click='generarSolicitud()']").click()
+    clic_con_reintento(
+        page, page.locator("button[ng-click='generarSolicitud()']"), "Guardar")
     # Diálogo: "¿Desea guardar la solicitud de pago?" -> Aceptar (si aparece).
     aceptar = page.locator("#__btn_aceptarConfirm__")
     try:
@@ -777,9 +810,99 @@ def hay_error_sistema(page):
     return False
 
 
+# Tamaño máximo que acepta SIPP por archivo (10 MB). Apuntamos un poco por
+# debajo para tener margen.
+MAX_SUBIDA_BYTES = int(9.6 * 1024 * 1024)
+
+
+def _nombre_limpio(nombre_archivo):
+    """Quita acentos, Ñ y caracteres especiales del nombre (SIPP no procesa
+    bien nombres con Ñ/acentos)."""
+    base, ext = os.path.splitext(nombre_archivo)
+    b = unicodedata.normalize("NFKD", base)
+    b = "".join(c for c in b if not unicodedata.combining(c))   # quita acentos/Ñ
+    b = re.sub(r"[^A-Za-z0-9 _.-]", "_", b)                     # solo seguros
+    b = re.sub(r"\s+", " ", b).strip(" ._-") or "archivo"
+    return b + ext.lower()
+
+
+def _carpeta_tmp_subida():
+    d = os.path.join(tempfile.gettempdir(), "rpa_sipp_subida")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _comprimir_pdf(origen, destino, max_bytes):
+    """Comprime un PDF a <= max_bytes con PyMuPDF. Devuelve True si lo logró.
+    Primero intento sin pérdida; si no basta, re-rasteriza bajando DPI/calidad."""
+    try:
+        import fitz  # PyMuPDF
+    except Exception:
+        log.warning("   (sin PyMuPDF: no se puede comprimir el PDF)")
+        return False
+    try:
+        doc = fitz.open(origen)
+        doc.save(destino, garbage=4, deflate=True, clean=True)
+        doc.close()
+        if os.path.getsize(destino) <= max_bytes:
+            return True
+        # Re-rasteriza páginas a JPEG bajando resolución/calidad.
+        for dpi, cal in ((150, 70), (120, 65), (100, 60), (90, 55), (72, 50)):
+            try:
+                src = fitz.open(origen)
+                out = fitz.open()
+                for pagina in src:
+                    pix = pagina.get_pixmap(dpi=dpi)
+                    img = pix.tobytes("jpeg", jpg_quality=cal)
+                    npage = out.new_page(width=pagina.rect.width,
+                                         height=pagina.rect.height)
+                    npage.insert_image(pagina.rect, stream=img)
+                out.save(destino, garbage=4, deflate=True)
+                out.close(); src.close()
+                if os.path.getsize(destino) <= max_bytes:
+                    return True
+            except Exception as e:
+                log.warning("   (fallo al rasterizar dpi=%d: %s)", dpi, e)
+        return os.path.getsize(destino) <= max_bytes
+    except Exception as e:
+        log.warning("   (error comprimiendo PDF: %s)", e)
+        return False
+
+
+def preparar_archivo(ruta):
+    """Deja un archivo LISTO para subir a SIPP: nombre sin Ñ/acentos/caracteres
+    especiales y, si es un PDF de más de ~10 MB, comprimido. Crea una copia
+    temporal cuando hace falta; si no, devuelve la ruta original."""
+    if not ruta or not os.path.isfile(ruta):
+        return ruta
+    nombre = os.path.basename(ruta)
+    limpio = _nombre_limpio(nombre)
+    es_pdf = ruta.lower().endswith(".pdf")
+    tam = os.path.getsize(ruta)
+    necesita_nombre = (limpio != nombre)
+    necesita_comprimir = es_pdf and tam > MAX_SUBIDA_BYTES
+    if not necesita_nombre and not necesita_comprimir:
+        return ruta
+    destino = os.path.join(_carpeta_tmp_subida(), limpio)
+    if necesita_comprimir:
+        log.info("   PDF de %.1f MB (>10MB): comprimiendo...", tam / 1024 / 1024)
+        if _comprimir_pdf(ruta, destino, MAX_SUBIDA_BYTES) and os.path.isfile(destino):
+            log.info("   Comprimido a %.1f MB.",
+                     os.path.getsize(destino) / 1024 / 1024)
+        else:
+            log.warning("   No se logró bajar de 10MB; se sube con nombre limpio.")
+            shutil.copy2(ruta, destino)
+    else:
+        shutil.copy2(ruta, destino)
+    if necesita_nombre:
+        log.info("   Nombre de archivo limpiado: '%s' -> '%s'", nombre, limpio)
+    return destino
+
+
 def subir_con_reintento(page, file_input, ruta, etiqueta, intentos=3):
     """Sube un archivo y reintenta si aparece 'Error del Sistema' (subida a
     Google intermitente). Lanza RuntimeError si falla tras los reintentos."""
+    ruta = preparar_archivo(ruta)   # nombre limpio (sin Ñ) + comprimido si >10MB
     for intento in range(1, intentos + 1):
         file_input.set_input_files(ruta)
         page.wait_for_timeout(4000)  # da tiempo a la subida
@@ -800,9 +923,9 @@ def solicitar_autorizacion(page):
         return
     log.info("   Solicitando autorización...")
     cerrar_alertas(page)
-    boton = page.locator("button[ng-click='enviarAutorizacion()']")
-    boton.wait_for(state="visible", timeout=config.TIMEOUT_MS)
-    boton.click()
+    clic_con_reintento(
+        page, page.locator("button[ng-click='enviarAutorizacion()']"),
+        "Solicitar Autorización")
     page.wait_for_timeout(1500)
     # Posible diálogo de confirmación.
     try:
@@ -943,7 +1066,7 @@ def llenar_solicitud(page, fila):
         llenar_cuenta_bancaria(page, fila, panel_acreedor, correo)
 
     # 5) Carátula en el campo "PDF" del acreedor (requerido en AMBOS casos).
-    caratula = buscar_caratula(nombre)
+    caratula = caratula_de_fila(fila)
     if caratula:
         log.info("   - Carátula (campo PDF acreedor) = '%s'", caratula)
         subir_con_reintento(page, page.locator("#ar_Pdf"),
@@ -1005,7 +1128,7 @@ def validar_datos(filas):
                 float(monto)
             except ValueError:
                 errs.append(f"MONTO no numérico: '{monto_txt}'")
-        if hay_car and monto and not buscar_caratula(nombre):
+        if monto and (hay_car or fila.get("_CARATULA")) and not caratula_de_fila(fila):
             errs.append("Falta carátula")
         if errs:
             problemas.append((nombre, errs))
