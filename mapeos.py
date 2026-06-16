@@ -25,15 +25,31 @@ SUCURSALES = {
     "CORPORATIVO": "Corporativo",
 }
 
-# CSV "BANCOS"  ->  texto en la lista "Banco" (modal Cuenta Bancaria)
+# CSV/OCR "BANCOS"  ->  texto EXACTO en la lista "Banco" de SIPP (modal Cuenta
+# Bancaria). Incluye los nombres que produce el OCR (BBVA, Citibanamex, Spin...).
 BANCOS = {
     "BANAMEX": "BANAMEX",
+    "CITIBANAMEX": "BANAMEX",
     "BBVA": "BBVA BANCOMER",
+    "BBVA BANCOMER": "BBVA BANCOMER",
     "SANTANDER": "SANTANDER",
     "HSBC": "HSBC",
     "BANORTE": "BANORTE",
     "BANCOPPEL": "BANCOPPEL",
     "SPIN BY OXXO": "Spin by OXXO",
+    "SPIN": "Spin by OXXO",
+    "BANREGIO": "BANREGIO",
+    "AZTECA": "AZTECA",
+    "BANCO AZTECA": "AZTECA",
+    "INBURSA": "INBURSA",
+    "SCOTIABANK": "SCOTIABANK",
+    "BAJIO": "BAJIO",
+    "BANCO DEL BAJIO": "BAJIO",
+    "CIBANCO": "CIBanco",
+    "AFIRME": "AFIRME",
+    "INVEX": "INVEX",
+    "BANSI": "BANSI",
+    "MIFEL": "MIFEL",
 }
 
 # CSV "MONEDA"  ->  texto en la lista "Moneda"

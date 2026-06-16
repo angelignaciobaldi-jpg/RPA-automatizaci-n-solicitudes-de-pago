@@ -39,6 +39,28 @@ try:
     import openpyxl  # noqa: F401  (lectura de Excel)
 except Exception:
     pass
+try:
+    import fitz  # noqa: F401  (PyMuPDF: comprimir PDFs grandes y OCR de PDFs)
+except Exception:
+    pass
+# Dependencias del OCR (Extractor Bancario): el código real importa estas libs
+# en tiempo de ejecución; las anclamos para que PyInstaller las empaquete.
+try:
+    import pytesseract  # noqa: F401  (motor OCR)
+except Exception:
+    pass
+try:
+    from PIL import Image, ImageOps  # noqa: F401  (Pillow: imágenes)
+except Exception:
+    pass
+try:
+    import pypdf  # noqa: F401  (leer/separar PDFs)
+except Exception:
+    pass
+try:
+    import pillow_heif  # noqa: F401  (imágenes HEIC/HEIF)
+except Exception:
+    pass
 # ---------------------------------------------------------------------------
 
 REPO = "angelignaciobaldi-jpg/RPA-automatizaci-n-solicitudes-de-pago"
@@ -47,7 +69,8 @@ API_URL = f"https://api.github.com/repos/{REPO}/contents?ref={RAMA}"
 RAW_URL = f"https://raw.githubusercontent.com/{REPO}/{RAMA}"
 
 # Módulos que se ejecutan (respaldo si la API de GitHub no responde).
-MODULOS = ["app.py", "sipp_rpa.py", "config.py", "mapeos.py", "validar_csv.py"]
+MODULOS = ["app.py", "sipp_rpa.py", "config.py", "mapeos.py", "validar_csv.py",
+           "extractor_bancario.py", "puente_ocr.py"]
 
 
 def ruta_recurso(rel):
@@ -120,7 +143,8 @@ def copiar_respaldo(dest):
 def _ejecutar_app(dest):
     if dest not in sys.path:
         sys.path.insert(0, dest)
-    for m in ("app", "sipp_rpa", "config", "mapeos", "validar_csv"):
+    for m in ("app", "sipp_rpa", "config", "mapeos", "validar_csv",
+              "extractor_bancario", "puente_ocr"):
         sys.modules.pop(m, None)
     import app
     app.App().mainloop()
