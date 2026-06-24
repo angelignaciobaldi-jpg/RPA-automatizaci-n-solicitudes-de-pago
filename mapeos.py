@@ -17,7 +17,9 @@ EMPRESAS = {
     "ASAMAZ": "Asamaz",
     "ASKE": "Aske",
     "PETROPLAZAS": "Petroplazas",
-    "PETROSMART": "Petro Smart",
+    "AENEKA" : "Inmobiliaria AENEKA",
+    "AENE" : "AENE PRODUCE",
+    "PETROSMART" : "Petro Smart"
 }
 
 # CSV "SUCURSAL"  ->  texto en la lista "Sucursal"
@@ -50,6 +52,7 @@ BANCOS = {
     "INVEX": "INVEX",
     "BANSI": "BANSI",
     "MIFEL": "MIFEL",
+    "NU MEXICO" : "Nu Mexico Financiera Sa. de CV."
 }
 
 # CSV "MONEDA"  ->  texto en la lista "Moneda"
